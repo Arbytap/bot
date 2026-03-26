@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+*.egg
+
+# Alembic
+# alembic/versions/  # keep versions in git
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Env
+.env
+.env.local
+*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Docker volumes
+pgdata/
+redisdata/
+uploads/
+
+# OS
+.DS_Store
+Thumbs.db
