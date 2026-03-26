@@ -5,9 +5,6 @@ Revises:
 Create Date: 2024-01-01 00:00:00.000000
 """
 from typing import Sequence, Union
-
-import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision: str = "0001"
@@ -17,287 +14,231 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Enums
-    company_type = postgresql.ENUM(
-        "customer", "general_contractor", "subcontractor", "designer",
-        "supervisor", "operator", "other",
-        name="company_type", create_type=True
-    )
-    user_role = postgresql.ENUM(
-        "admin", "manager", "editor", "viewer",
-        name="user_role", create_type=True
-    )
-    project_status = postgresql.ENUM(
-        "planned", "active", "frozen", "closed",
-        name="project_status", create_type=True
-    )
-    project_company_role = postgresql.ENUM(
-        "customer", "general_contractor", "subcontractor", "designer",
-        "supervisor", "operator", "other",
-        name="project_company_role", create_type=True
-    )
-    chain_direction = postgresql.ENUM(
-        "incoming", "outgoing", "mixed",
-        name="chain_direction", create_type=True
-    )
-    letter_type = postgresql.ENUM(
-        "incoming", "outgoing", "internal",
-        name="letter_type", create_type=True
-    )
-    letter_status = postgresql.ENUM(
-        "received", "in_work", "done", "sent", "archived",
-        name="letter_status", create_type=True
-    )
-    doc_type = postgresql.ENUM(
-        "project_doc", "working_doc", "as_built", "contract", "order", "report", "other",
-        name="doc_type", create_type=True
-    )
-    doc_status = postgresql.ENUM(
-        "draft", "on_approval", "approved", "archived",
-        name="doc_status", create_type=True
-    )
-    approval_status = postgresql.ENUM(
-        "pending", "in_progress", "approved", "rejected", "cancelled",
-        name="approval_status", create_type=True
-    )
+    op.execute("""
+        CREATE TYPE company_type AS ENUM (
+            'customer','general_contractor','subcontractor',
+            'designer','supervisor','operator','other'
+        );
+        CREATE TYPE user_role AS ENUM ('admin','manager','editor','viewer');
+        CREATE TYPE project_status AS ENUM ('planned','active','frozen','closed');
+        CREATE TYPE project_company_role AS ENUM (
+            'customer','general_contractor','subcontractor',
+            'designer','supervisor','operator','other'
+        );
+        CREATE TYPE chain_direction AS ENUM ('incoming','outgoing','mixed');
+        CREATE TYPE letter_type AS ENUM ('incoming','outgoing','internal');
+        CREATE TYPE letter_status AS ENUM ('received','in_work','done','sent','archived');
+        CREATE TYPE doc_type AS ENUM (
+            'project_doc','working_doc','as_built','contract','order','report','other'
+        );
+        CREATE TYPE doc_status AS ENUM ('draft','on_approval','approved','archived');
+        CREATE TYPE approval_status AS ENUM (
+            'pending','in_progress','approved','rejected','cancelled'
+        );
 
-    company_type.create(op.get_bind(), checkfirst=True)
-    user_role.create(op.get_bind(), checkfirst=True)
-    project_status.create(op.get_bind(), checkfirst=True)
-    project_company_role.create(op.get_bind(), checkfirst=True)
-    chain_direction.create(op.get_bind(), checkfirst=True)
-    letter_type.create(op.get_bind(), checkfirst=True)
-    letter_status.create(op.get_bind(), checkfirst=True)
-    doc_type.create(op.get_bind(), checkfirst=True)
-    doc_status.create(op.get_bind(), checkfirst=True)
-    approval_status.create(op.get_bind(), checkfirst=True)
+        CREATE TABLE companies (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            name        VARCHAR(500) NOT NULL,
+            short_name  VARCHAR(200) NOT NULL,
+            inn         VARCHAR(12),
+            kpp         VARCHAR(9),
+            company_type company_type NOT NULL DEFAULT 'other',
+            is_internal BOOLEAN NOT NULL DEFAULT FALSE,
+            is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at  TIMESTAMP NOT NULL DEFAULT NOW()
+        );
 
-    op.create_table(
-        "companies",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("name", sa.String(500), nullable=False),
-        sa.Column("short_name", sa.String(200), nullable=False),
-        sa.Column("inn", sa.String(12), nullable=True),
-        sa.Column("kpp", sa.String(9), nullable=True),
-        sa.Column("company_type", sa.Enum("customer", "general_contractor", "subcontractor", "designer", "supervisor", "operator", "other", name="company_type", create_type=False), nullable=False),
-        sa.Column("is_internal", sa.Boolean(), default=False, nullable=False),
-        sa.Column("is_active", sa.Boolean(), default=True, nullable=False),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-    )
+        CREATE TABLE users (
+            id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            email               VARCHAR(255) NOT NULL UNIQUE,
+            username            VARCHAR(100) NOT NULL UNIQUE,
+            full_name           VARCHAR(300) NOT NULL,
+            hashed_password     VARCHAR(255) NOT NULL,
+            is_active           BOOLEAN NOT NULL DEFAULT TRUE,
+            is_superuser        BOOLEAN NOT NULL DEFAULT FALSE,
+            current_company_id  UUID REFERENCES companies(id) ON DELETE SET NULL,
+            created_at          TIMESTAMP NOT NULL DEFAULT NOW(),
+            last_login          TIMESTAMP
+        );
+        CREATE INDEX ix_users_email    ON users(email);
+        CREATE INDEX ix_users_username ON users(username);
 
-    op.create_table(
-        "users",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("email", sa.String(255), nullable=False, unique=True),
-        sa.Column("username", sa.String(100), nullable=False, unique=True),
-        sa.Column("full_name", sa.String(300), nullable=False),
-        sa.Column("hashed_password", sa.String(255), nullable=False),
-        sa.Column("is_active", sa.Boolean(), default=True, nullable=False),
-        sa.Column("is_superuser", sa.Boolean(), default=False, nullable=False),
-        sa.Column("current_company_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("companies.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.Column("last_login", sa.DateTime(), nullable=True),
-    )
-    op.create_index("ix_users_email", "users", ["email"])
-    op.create_index("ix_users_username", "users", ["username"])
+        CREATE TABLE user_company_roles (
+            id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id    UUID NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+            company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+            role       user_role NOT NULL DEFAULT 'viewer',
+            is_active  BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX ix_ucr_user    ON user_company_roles(user_id);
+        CREATE INDEX ix_ucr_company ON user_company_roles(company_id);
 
-    op.create_table(
-        "user_company_roles",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("company_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("companies.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("role", sa.Enum("admin", "manager", "editor", "viewer", name="user_role", create_type=False), nullable=False),
-        sa.Column("is_active", sa.Boolean(), default=True, nullable=False),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-    )
-    op.create_index("ix_ucr_user", "user_company_roles", ["user_id"])
-    op.create_index("ix_ucr_company", "user_company_roles", ["company_id"])
+        CREATE TABLE projects (
+            id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            code             VARCHAR(100) NOT NULL UNIQUE,
+            name             VARCHAR(500) NOT NULL,
+            description      TEXT,
+            status           project_status NOT NULL DEFAULT 'planned',
+            start_date       DATE,
+            end_date         DATE,
+            owner_company_id UUID NOT NULL REFERENCES companies(id) ON DELETE RESTRICT,
+            created_at       TIMESTAMP NOT NULL DEFAULT NOW(),
+            updated_at       TIMESTAMP NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX ix_projects_code   ON projects(code);
+        CREATE INDEX ix_projects_status ON projects(status);
+        CREATE INDEX ix_projects_owner  ON projects(owner_company_id);
 
-    op.create_table(
-        "projects",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("code", sa.String(100), nullable=False, unique=True),
-        sa.Column("name", sa.String(500), nullable=False),
-        sa.Column("description", sa.Text(), nullable=True),
-        sa.Column("status", sa.Enum("planned", "active", "frozen", "closed", name="project_status", create_type=False), nullable=False),
-        sa.Column("start_date", sa.Date(), nullable=True),
-        sa.Column("end_date", sa.Date(), nullable=True),
-        sa.Column("owner_company_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("companies.id", ondelete="RESTRICT"), nullable=False),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(), nullable=False),
-    )
-    op.create_index("ix_projects_code", "projects", ["code"])
-    op.create_index("ix_projects_status", "projects", ["status"])
-    op.create_index("ix_projects_owner", "projects", ["owner_company_id"])
+        CREATE TABLE project_companies (
+            id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id UUID NOT NULL REFERENCES projects(id)  ON DELETE CASCADE,
+            company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+            role       project_company_role NOT NULL DEFAULT 'other',
+            joined_at  TIMESTAMP NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX ix_pc_project ON project_companies(project_id);
+        CREATE INDEX ix_pc_company ON project_companies(company_id);
 
-    op.create_table(
-        "project_companies",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("project_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("company_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("companies.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("role", sa.Enum("customer", "general_contractor", "subcontractor", "designer", "supervisor", "operator", "other", name="project_company_role", create_type=False), nullable=False),
-        sa.Column("joined_at", sa.DateTime(), nullable=False),
-    )
-    op.create_index("ix_pc_project", "project_companies", ["project_id"])
-    op.create_index("ix_pc_company", "project_companies", ["company_id"])
+        CREATE TABLE chains (
+            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id      UUID NOT NULL REFERENCES projects(id)  ON DELETE CASCADE,
+            subject         VARCHAR(500) NOT NULL,
+            direction       chain_direction NOT NULL DEFAULT 'mixed',
+            main_company_id UUID REFERENCES companies(id) ON DELETE SET NULL,
+            created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX ix_chains_project      ON chains(project_id);
+        CREATE INDEX ix_chains_main_company ON chains(main_company_id);
 
-    op.create_table(
-        "chains",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("project_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("subject", sa.String(500), nullable=False),
-        sa.Column("direction", sa.Enum("incoming", "outgoing", "mixed", name="chain_direction", create_type=False), nullable=False),
-        sa.Column("main_company_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("companies.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-    )
-    op.create_index("ix_chains_project", "chains", ["project_id"])
-    op.create_index("ix_chains_main_company", "chains", ["main_company_id"])
+        CREATE TABLE letters (
+            id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            chain_id         UUID NOT NULL REFERENCES chains(id)   ON DELETE CASCADE,
+            project_id       UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            owner_company_id UUID NOT NULL REFERENCES companies(id) ON DELETE RESTRICT,
+            letter_type      letter_type NOT NULL,
+            letter_date      DATE,
+            number           VARCHAR(100),
+            org_number       VARCHAR(100),
+            from_company_id  UUID REFERENCES companies(id) ON DELETE SET NULL,
+            to_company_id    UUID REFERENCES companies(id) ON DELETE SET NULL,
+            subject          VARCHAR(500),
+            body             TEXT,
+            status           letter_status NOT NULL DEFAULT 'received',
+            reply_to_id      UUID REFERENCES letters(id) ON DELETE SET NULL,
+            resolution       TEXT,
+            note             TEXT,
+            created_at       TIMESTAMP NOT NULL DEFAULT NOW(),
+            updated_at       TIMESTAMP NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX ix_letters_project  ON letters(project_id);
+        CREATE INDEX ix_letters_chain    ON letters(chain_id);
+        CREATE INDEX ix_letters_owner    ON letters(owner_company_id);
+        CREATE INDEX ix_letters_type     ON letters(letter_type);
+        CREATE INDEX ix_letters_status   ON letters(status);
+        CREATE INDEX ix_letters_date     ON letters(letter_date);
+        CREATE INDEX ix_letters_number   ON letters(number);
+        CREATE INDEX ix_letters_reply_to ON letters(reply_to_id);
+        CREATE INDEX ix_letters_from     ON letters(from_company_id);
+        CREATE INDEX ix_letters_to       ON letters(to_company_id);
 
-    op.create_table(
-        "letters",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("chain_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("chains.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("project_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("owner_company_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("companies.id", ondelete="RESTRICT"), nullable=False),
-        sa.Column("letter_type", sa.Enum("incoming", "outgoing", "internal", name="letter_type", create_type=False), nullable=False),
-        sa.Column("letter_date", sa.Date(), nullable=True),
-        sa.Column("number", sa.String(100), nullable=True),
-        sa.Column("org_number", sa.String(100), nullable=True),
-        sa.Column("from_company_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("companies.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("to_company_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("companies.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("subject", sa.String(500), nullable=True),
-        sa.Column("body", sa.Text(), nullable=True),
-        sa.Column("status", sa.Enum("received", "in_work", "done", "sent", "archived", name="letter_status", create_type=False), nullable=False),
-        sa.Column("reply_to_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("letters.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("resolution", sa.Text(), nullable=True),
-        sa.Column("note", sa.Text(), nullable=True),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(), nullable=False),
-    )
-    op.create_index("ix_letters_project", "letters", ["project_id"])
-    op.create_index("ix_letters_chain", "letters", ["chain_id"])
-    op.create_index("ix_letters_owner", "letters", ["owner_company_id"])
-    op.create_index("ix_letters_type", "letters", ["letter_type"])
-    op.create_index("ix_letters_status", "letters", ["status"])
-    op.create_index("ix_letters_date", "letters", ["letter_date"])
-    op.create_index("ix_letters_number", "letters", ["number"])
-    op.create_index("ix_letters_reply_to", "letters", ["reply_to_id"])
-    op.create_index("ix_letters_from", "letters", ["from_company_id"])
-    op.create_index("ix_letters_to", "letters", ["to_company_id"])
+        CREATE TABLE letter_files (
+            id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            letter_id     UUID NOT NULL REFERENCES letters(id) ON DELETE CASCADE,
+            filename      VARCHAR(500) NOT NULL,
+            original_name VARCHAR(500) NOT NULL,
+            content_type  VARCHAR(200) NOT NULL,
+            size          BIGINT NOT NULL,
+            storage_path  VARCHAR(1000) NOT NULL,
+            uploaded_by_id UUID REFERENCES users(id) ON DELETE SET NULL,
+            uploaded_at   TIMESTAMP NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX ix_letter_files_letter ON letter_files(letter_id);
 
-    op.create_table(
-        "letter_files",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("letter_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("letters.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("filename", sa.String(500), nullable=False),
-        sa.Column("original_name", sa.String(500), nullable=False),
-        sa.Column("content_type", sa.String(200), nullable=False),
-        sa.Column("size", sa.BigInteger(), nullable=False),
-        sa.Column("storage_path", sa.String(1000), nullable=False),
-        sa.Column("uploaded_by_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("uploaded_at", sa.DateTime(), nullable=False),
-    )
-    op.create_index("ix_letter_files_letter", "letter_files", ["letter_id"])
+        CREATE TABLE project_documents (
+            id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id       UUID NOT NULL REFERENCES projects(id)  ON DELETE CASCADE,
+            owner_company_id UUID NOT NULL REFERENCES companies(id) ON DELETE RESTRICT,
+            doc_type         doc_type NOT NULL DEFAULT 'other',
+            code             VARCHAR(200),
+            name             VARCHAR(500) NOT NULL,
+            description      TEXT,
+            status           doc_status NOT NULL DEFAULT 'draft',
+            version          VARCHAR(50) NOT NULL DEFAULT '1.0',
+            linked_letter_id UUID REFERENCES letters(id) ON DELETE SET NULL,
+            created_at       TIMESTAMP NOT NULL DEFAULT NOW(),
+            updated_at       TIMESTAMP NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX ix_docs_project ON project_documents(project_id);
+        CREATE INDEX ix_docs_owner   ON project_documents(owner_company_id);
+        CREATE INDEX ix_docs_type    ON project_documents(doc_type);
+        CREATE INDEX ix_docs_status  ON project_documents(status);
+        CREATE INDEX ix_docs_code    ON project_documents(code);
 
-    op.create_table(
-        "project_documents",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("project_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("owner_company_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("companies.id", ondelete="RESTRICT"), nullable=False),
-        sa.Column("doc_type", sa.Enum("project_doc", "working_doc", "as_built", "contract", "order", "report", "other", name="doc_type", create_type=False), nullable=False),
-        sa.Column("code", sa.String(200), nullable=True),
-        sa.Column("name", sa.String(500), nullable=False),
-        sa.Column("description", sa.Text(), nullable=True),
-        sa.Column("status", sa.Enum("draft", "on_approval", "approved", "archived", name="doc_status", create_type=False), nullable=False),
-        sa.Column("version", sa.String(50), nullable=False),
-        sa.Column("linked_letter_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("letters.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(), nullable=False),
-    )
-    op.create_index("ix_docs_project", "project_documents", ["project_id"])
-    op.create_index("ix_docs_owner", "project_documents", ["owner_company_id"])
-    op.create_index("ix_docs_type", "project_documents", ["doc_type"])
-    op.create_index("ix_docs_status", "project_documents", ["status"])
-    op.create_index("ix_docs_code", "project_documents", ["code"])
+        CREATE TABLE project_document_files (
+            id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            document_id   UUID NOT NULL REFERENCES project_documents(id) ON DELETE CASCADE,
+            filename      VARCHAR(500) NOT NULL,
+            original_name VARCHAR(500) NOT NULL,
+            content_type  VARCHAR(200) NOT NULL,
+            size          BIGINT NOT NULL,
+            storage_path  VARCHAR(1000) NOT NULL,
+            version       VARCHAR(50) NOT NULL DEFAULT '1.0',
+            uploaded_by_id UUID REFERENCES users(id) ON DELETE SET NULL,
+            uploaded_at   TIMESTAMP NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX ix_doc_files_document ON project_document_files(document_id);
 
-    op.create_table(
-        "project_document_files",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("document_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("project_documents.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("filename", sa.String(500), nullable=False),
-        sa.Column("original_name", sa.String(500), nullable=False),
-        sa.Column("content_type", sa.String(200), nullable=False),
-        sa.Column("size", sa.BigInteger(), nullable=False),
-        sa.Column("storage_path", sa.String(1000), nullable=False),
-        sa.Column("version", sa.String(50), nullable=False),
-        sa.Column("uploaded_by_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("uploaded_at", sa.DateTime(), nullable=False),
-    )
-    op.create_index("ix_doc_files_document", "project_document_files", ["document_id"])
+        CREATE TABLE approval_routes (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id  UUID REFERENCES projects(id) ON DELETE CASCADE,
+            name        VARCHAR(300) NOT NULL,
+            description TEXT,
+            is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at  TIMESTAMP NOT NULL DEFAULT NOW()
+        );
 
-    op.create_table(
-        "approval_routes",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("project_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=True),
-        sa.Column("name", sa.String(300), nullable=False),
-        sa.Column("description", sa.Text(), nullable=True),
-        sa.Column("is_active", sa.Boolean(), default=True, nullable=False),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-    )
+        CREATE TABLE approval_steps (
+            id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            route_id      UUID NOT NULL REFERENCES approval_routes(id) ON DELETE CASCADE,
+            order_num     INTEGER NOT NULL,
+            name          VARCHAR(300) NOT NULL,
+            assignee_id   UUID REFERENCES users(id) ON DELETE SET NULL,
+            company_id    UUID REFERENCES companies(id) ON DELETE SET NULL,
+            deadline_days INTEGER
+        );
 
-    op.create_table(
-        "approval_steps",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("route_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("approval_routes.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("order_num", sa.Integer(), nullable=False),
-        sa.Column("name", sa.String(300), nullable=False),
-        sa.Column("assignee_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("company_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("companies.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("deadline_days", sa.Integer(), nullable=True),
-    )
-
-    op.create_table(
-        "approval_tasks",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("project_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("route_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("approval_routes.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("letter_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("letters.id", ondelete="CASCADE"), nullable=True),
-        sa.Column("document_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("project_documents.id", ondelete="CASCADE"), nullable=True),
-        sa.Column("title", sa.String(500), nullable=False),
-        sa.Column("status", sa.Enum("pending", "in_progress", "approved", "rejected", "cancelled", name="approval_status", create_type=False), nullable=False),
-        sa.Column("current_step", sa.Integer(), nullable=False),
-        sa.Column("assignee_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("created_by_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("comment", sa.Text(), nullable=True),
-        sa.Column("deadline", sa.DateTime(), nullable=True),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(), nullable=False),
-    )
-    op.create_index("ix_tasks_project", "approval_tasks", ["project_id"])
-    op.create_index("ix_tasks_assignee", "approval_tasks", ["assignee_id"])
-    op.create_index("ix_tasks_status", "approval_tasks", ["status"])
-    op.create_index("ix_tasks_letter", "approval_tasks", ["letter_id"])
-    op.create_index("ix_tasks_document", "approval_tasks", ["document_id"])
+        CREATE TABLE approval_tasks (
+            id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_id     UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            route_id       UUID REFERENCES approval_routes(id) ON DELETE SET NULL,
+            letter_id      UUID REFERENCES letters(id) ON DELETE CASCADE,
+            document_id    UUID REFERENCES project_documents(id) ON DELETE CASCADE,
+            title          VARCHAR(500) NOT NULL,
+            status         approval_status NOT NULL DEFAULT 'pending',
+            current_step   INTEGER NOT NULL DEFAULT 1,
+            assignee_id    UUID REFERENCES users(id) ON DELETE SET NULL,
+            created_by_id  UUID REFERENCES users(id) ON DELETE SET NULL,
+            comment        TEXT,
+            deadline       TIMESTAMP,
+            created_at     TIMESTAMP NOT NULL DEFAULT NOW(),
+            updated_at     TIMESTAMP NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX ix_tasks_project  ON approval_tasks(project_id);
+        CREATE INDEX ix_tasks_assignee ON approval_tasks(assignee_id);
+        CREATE INDEX ix_tasks_status   ON approval_tasks(status);
+        CREATE INDEX ix_tasks_letter   ON approval_tasks(letter_id);
+        CREATE INDEX ix_tasks_document ON approval_tasks(document_id);
+    """)
 
 
 def downgrade() -> None:
-    op.drop_table("approval_tasks")
-    op.drop_table("approval_steps")
-    op.drop_table("approval_routes")
-    op.drop_table("project_document_files")
-    op.drop_table("project_documents")
-    op.drop_table("letter_files")
-    op.drop_table("letters")
-    op.drop_table("chains")
-    op.drop_table("project_companies")
-    op.drop_table("projects")
-    op.drop_table("user_company_roles")
-    op.drop_table("users")
-    op.drop_table("companies")
-
-    for enum_name in [
-        "approval_status", "doc_status", "doc_type", "letter_status",
-        "letter_type", "chain_direction", "project_company_role",
-        "project_status", "user_role", "company_type",
-    ]:
-        op.execute(f"DROP TYPE IF EXISTS {enum_name}")
+    op.execute("""
+        DROP TABLE IF EXISTS approval_tasks, approval_steps, approval_routes,
+            project_document_files, project_documents, letter_files, letters,
+            chains, project_companies, projects, user_company_roles, users,
+            companies CASCADE;
+        DROP TYPE IF EXISTS approval_status, doc_status, doc_type, letter_status,
+            letter_type, chain_direction, project_company_role, project_status,
+            user_role, company_type CASCADE;
+    """)
